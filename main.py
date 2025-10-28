@@ -192,7 +192,9 @@ class MainWindow(QMainWindow):
         self.tab_graphs = QWidget()
         v_graph = QVBoxLayout()
         self.pg_plot = pg.PlotWidget(title="Очередь, загрузка и погружено")
+        self.pg_plot.addLegend()  # <-- ЛЕГЕНДА ДОБАВЛЕНА
         self.pg_plot_avg = pg.PlotWidget(title="Среднее ожидание")
+        self.pg_plot_avg.addLegend()  # <-- ЛЕГЕНДА ДОБАВЛЕНА
         v_graph.addWidget(self.pg_plot)
         v_graph.addWidget(self.pg_plot_avg)
         self.tab_graphs.setLayout(v_graph)
