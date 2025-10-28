@@ -34,10 +34,10 @@ state = {
     "global_queue": deque(),
     "wait_times": [],
     "total_loaded": 0,
-    "time_series": deque(maxlen=60),
-    "waiting_trucks": deque(maxlen=60),
-    "loading_trucks": deque(maxlen=60),
-    "loaded_cumulative": deque(maxlen=60)
+    "step_count": 0,  # <-- счётчик шагов для оси X
+    "waiting_trucks": [],   # теперь списки — история накапливается полностью
+    "loading_trucks": [],
+    "loaded_cumulative": []
 }
 
 # -------------------------- Класс грузовика --------------------------
@@ -191,10 +191,19 @@ class MainWindow(QMainWindow):
         # -------------------------- Вкладка графиков --------------------------
         self.tab_graphs = QWidget()
         v_graph = QVBoxLayout()
+
+        # Основной график — теперь с полной историей
         self.pg_plot = pg.PlotWidget(title="Очередь, загрузка и погружено")
-        self.pg_plot.addLegend()  # <-- ЛЕГЕНДА ДОБАВЛЕНА
+        self.pg_plot.addLegend()
+        self.pg_plot.setLabel('left', 'Количество грузовиков')
+        self.pg_plot.setLabel('bottom', 'Шаг симуляции')
+
+        # График среднего ожидания
         self.pg_plot_avg = pg.PlotWidget(title="Среднее ожидание")
-        self.pg_plot_avg.addLegend()  # <-- ЛЕГЕНДА ДОБАВЛЕНА
+        self.pg_plot_avg.addLegend()
+        self.pg_plot_avg.setLabel('left', 'Среднее время ожидания (сек)')
+        self.pg_plot_avg.setLabel('bottom', 'Количество обработанных грузовиков')
+
         v_graph.addWidget(self.pg_plot)
         v_graph.addWidget(self.pg_plot_avg)
         self.tab_graphs.setLayout(v_graph)
@@ -225,7 +234,14 @@ class MainWindow(QMainWindow):
 
     # -------------------------- Методы управления --------------------------
     def start(self):
+        # Сброс счётчика при старте (опционально)
         state["truck_id"] = 0
+        state["step_count"] = 0
+        state["waiting_trucks"].clear()
+        state["loading_trucks"].clear()
+        state["loaded_cumulative"].clear()
+        state["wait_times"].clear()
+        state["total_loaded"] = 0
         self.timer.start(UPDATE_INTERVAL)
 
     def stop(self):
@@ -360,22 +376,32 @@ class MainWindow(QMainWindow):
             self.truck_table.setItem(row, 4, QTableWidgetItem(str(wait_time)))
 
     def update_graphs(self):
-        state["time_series"].append(len(state["time_series"]))
+        state["step_count"] += 1
+        current_step = state["step_count"]
+
         queue_len = len(state["global_queue"]) + sum(len(q) for q in state["dock_queues"])
         loading = sum(1 for q in state["dock_queues"] if q and q[0].loading)
+
+        # Накапливаем полную историю
         state["waiting_trucks"].append(queue_len)
         state["loading_trucks"].append(loading)
         state["loaded_cumulative"].append(state["total_loaded"])
 
-        self.pg_plot.clear()
-        self.pg_plot.plot(list(state["waiting_trucks"]), pen=pg.mkPen('r', width=2), name="Очередь")
-        self.pg_plot.plot(list(state["loading_trucks"]), pen=pg.mkPen('b', width=2), name="Погрузка")
-        self.pg_plot.plot(list(state["loaded_cumulative"]), pen=pg.mkPen('g', width=2), name="Погружено")
+        # Ось X — шаги симуляции: 1, 2, 3, ..., N
+        steps = list(range(1, current_step + 1))
 
+        self.pg_plot.clear()
+        self.pg_plot.plot(steps, state["waiting_trucks"], pen=pg.mkPen('r', width=2), name="Очередь")
+        self.pg_plot.plot(steps, state["loading_trucks"], pen=pg.mkPen('b', width=2), name="Погрузка")
+        self.pg_plot.plot(steps, state["loaded_cumulative"], pen=pg.mkPen('g', width=2), name="Погружено")
+
+        # График среднего ожидания
         self.pg_plot_avg.clear()
         if state["wait_times"]:
-            avg = [sum(state["wait_times"][:i+1])/len(state["wait_times"][:i+1]) for i in range(len(state["wait_times"]))]
-            self.pg_plot_avg.plot(avg, pen=pg.mkPen('m', width=2), name="Среднее ожидание")
+            # Вычисляем накопленное среднее
+            avg = [sum(state["wait_times"][:i+1]) / (i+1) for i in range(len(state["wait_times"]))]
+            truck_indices = list(range(1, len(avg) + 1))
+            self.pg_plot_avg.plot(truck_indices, avg, pen=pg.mkPen('m', width=2), name="Среднее ожидание")
 
 # -------------------------- Запуск --------------------------
 if __name__ == "__main__":
