@@ -18,6 +18,8 @@ DOCK_Y_GAP = 120
 TRUCK_SPEED = 5
 UPDATE_INTERVAL = 50  # мс
 TRUCK_ARRIVAL_PROB = 0.02
+FIRE_DURATION = 10  # секунд
+FIRE_COST = 300
 
 TRUCK_TYPES = {
     "Small": (40, 25, 3, 6, "lightblue"),
@@ -34,10 +36,17 @@ state = {
     "global_queue": deque(),
     "wait_times": [],
     "total_loaded": 0,
-    "step_count": 0,  # <-- счётчик шагов для оси X
-    "waiting_trucks": [],   # теперь списки — история накапливается полностью
+    "step_count": 0,
+    "waiting_trucks": [],
     "loading_trucks": [],
-    "loaded_cumulative": []
+    "loaded_cumulative": [],
+    "dock_status": [None]*MAX_BAYS,
+    "money": 0,
+    "money_history": [],  # ✅ Новая история финансов
+    "repair_cost": 100,
+    "truck_profit": {"Small": 30, "Medium": 50, "Large": 80},
+    "transactions": [],
+    "fire_timers": [None]*MAX_BAYS
 }
 
 # -------------------------- Класс грузовика --------------------------
@@ -53,16 +62,15 @@ class Truck(QGraphicsRectItem):
         self.start_time = None
         self.load_time = random.uniform(min_load, max_load)
         self.loading = False
+        self.returning_to_queue = False
         self.setBrush(QBrush(QColor(color)))
         self.setZValue(1)
         self.target_x = 100
         self.target_y = 80
 
-        # Текст с ID
         self.text = QGraphicsSimpleTextItem(f"T{tid}", self)
         self.text.setPos(w/4, -15)
 
-        # Индикатор прогресса
         self.progress = QGraphicsRectItem(0, h+2, w, 5, self)
         self.progress.setBrush(QBrush(QColor("green")))
         self.progress.setRect(0, h+2, 0, 5)
@@ -88,68 +96,32 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Управление погрузкой грузовых автомобилей")
-        self.resize(1300, 700)
+        self.resize(1500, 800)  # чуть выше для 3 графиков
         self.init_ui()
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_simulation)
+
+        self.fire_colors = [False] * MAX_BAYS
+        self.fire_blink_timer = QTimer()
+        self.fire_blink_timer.timeout.connect(self.blink_fire_colors)
+        self.fire_blink_timer.start(500)
 
     def init_ui(self):
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
 
-        # -------------------------- Вкладка описание --------------------------
+        # Вкладка описание
         self.tab_desc = QWidget()
         layout_desc = QVBoxLayout()
         text = QTextBrowser()
-        text.setHtml("""
-        <h1 style="color:#2c3e50; text-align:center;">Управление погрузкой грузовых автомобилей</h1>
-
-        <p style="font-size:14px;">
-        Данная система предназначена для моделирования работы доков погрузки грузовых автомобилей на складе или предприятии. 
-        Грузовики приезжают к докам, ожидают своей очереди, проходят процесс загрузки и уезжают после завершения. 
-        Цель системы — оптимизация работы доков и контроль очереди грузовиков.
-        </p>
-
-        <h3 style="color:#27ae60;">Цвет дока:</h3>
-        <ul style="font-size:13px;">
-        <li><span style="color:green;">Зелёный</span> — док работает и готов принимать грузовики</li>
-        <li><span style="color:red;">Красный</span> — док сломан и не принимает грузовики</li>
-        <li><span style="color:orange;">Жёлтый</span> — идёт процесс загрузки</li>
-        </ul>
-
-        <h3 style="color:#2980b9;">Типы грузовиков:</h3>
-        <ul style="font-size:13px;">
-        <li>Small — малый грузовик, быстрая загрузка</li>
-        <li>Medium — средний грузовик, среднее время загрузки</li>
-        <li>Large — большой грузовик, длительная загрузка</li>
-        </ul>
-
-        <h3 style="color:#c0392b;">Работа системы:</h3>
-        <ul style="font-size:13px;">
-        <li>Грузовики формируют глобальную очередь перед доками.</li>
-        <li>Если док свободен и исправен, грузовик подъезжает к нему и начинается загрузка.</li>
-        <li>Если док сломан, грузовик ожидает свободного исправного дока.</li>
-        <li>Система позволяет аварийно останавливать доки или восстанавливать их работу.</li>
-        <li>Пользователь может регулировать вероятность появления новых грузовиков с помощью ползунка.</li>
-        </ul>
-
-        <h3 style="color:#8e44ad;">Разработчик:</h3>
-        <p style="font-size:13px;">Мухтаров Руслан ст. гр. ПИ-430Б</p>
-
-        <h3 style="color:#16a085;">Инструкция для пользователя:</h3>
-        <ul style="font-size:13px;">
-        <li>Запустите симуляцию кнопкой <b>▶️ Запустить</b>.</li>
-        <li>Для остановки используйте кнопку <b>⏹ Остановить</b>.</li>
-        <li>Можно аварийно вывести доки из строя или починить их по одному или все сразу.</li>
-        <li>Следите за графиками очереди, загрузки и общего числа погруженных грузовиков.</li>
-        </ul>
-        """)
+        text.setHtml("<h1 style='color:#2c3e50; text-align:center;'>Управление погрузкой грузовых автомобилей</h1>"
+                     "<p style='font-size:14px;'>Система моделирования работы доков на складе с финансовым учётом.</p>")
         text.setReadOnly(True)
         layout_desc.addWidget(text)
         self.tab_desc.setLayout(layout_desc)
         self.tabs.addTab(self.tab_desc, "🧭 Описание")
 
-        # -------------------------- Вкладка анимации --------------------------
+        # Вкладка анимации
         self.tab_anim = QWidget()
         h_layout = QHBoxLayout()
         self.scene = QGraphicsScene()
@@ -168,11 +140,15 @@ class MainWindow(QMainWindow):
         self.btn_repair_all = QPushButton("🔧 Починить все")
         self.dock_combo = QComboBox()
         self.dock_combo.addItems([f"Док {i+1}" for i in range(MAX_BAYS)])
-        self.btn_emergency_single = QPushButton("💥 Сломать")
-        self.btn_repair_single = QPushButton("🧰 Починить")
+        self.btn_emergency_single = QPushButton("💥 Поломка дока")
+        self.btn_fire_single = QPushButton("🔥 Пожар в доке")
+        self.btn_repair_single = QPushButton("🧰 Починить док")
         self.slider_arrival = QSlider(Qt.Orientation.Horizontal)
         self.slider_arrival.setRange(1, 50)
         self.slider_arrival.setValue(int(TRUCK_ARRIVAL_PROB*1000))
+        self.label_money = QLabel(f"💰 Деньги: {state['money']}")
+        self.tx_browser = QTextBrowser()
+
         v_controls.addWidget(self.btn_start)
         v_controls.addWidget(self.btn_stop)
         v_controls.addWidget(self.btn_emergency_all)
@@ -180,51 +156,59 @@ class MainWindow(QMainWindow):
         v_controls.addWidget(QLabel("Выбор дока:"))
         v_controls.addWidget(self.dock_combo)
         v_controls.addWidget(self.btn_emergency_single)
+        v_controls.addWidget(self.btn_fire_single)
         v_controls.addWidget(self.btn_repair_single)
-        v_controls.addWidget(QLabel("Скорость появления грузовиков"))
+        v_controls.addWidget(QLabel("Вероятность прибытия (‰):"))
         v_controls.addWidget(self.slider_arrival)
-        h_layout.addLayout(v_controls)
+        v_controls.addWidget(self.label_money)
+        v_controls.addWidget(QLabel("📜 История транзакций:"))
+        v_controls.addWidget(self.tx_browser)
 
+        h_layout.addLayout(v_controls)
         self.tab_anim.setLayout(h_layout)
         self.tabs.addTab(self.tab_anim, "🚛 Анимация")
 
-        # -------------------------- Вкладка графиков --------------------------
+        # Вкладка графиков — ✅ ДОБАВЛЕН ТРЕТИЙ ГРАФИК
         self.tab_graphs = QWidget()
         v_graph = QVBoxLayout()
-
-        # Основной график — теперь с полной историей
         self.pg_plot = pg.PlotWidget(title="Очередь, загрузка и погружено")
         self.pg_plot.addLegend()
         self.pg_plot.setLabel('left', 'Количество грузовиков')
         self.pg_plot.setLabel('bottom', 'Шаг симуляции')
 
-        # График среднего ожидания
         self.pg_plot_avg = pg.PlotWidget(title="Среднее ожидание")
         self.pg_plot_avg.addLegend()
         self.pg_plot_avg.setLabel('left', 'Среднее время ожидания (сек)')
         self.pg_plot_avg.setLabel('bottom', 'Количество обработанных грузовиков')
 
+        self.pg_plot_money = pg.PlotWidget(title="Финансы (Деньги)")
+        self.pg_plot_money.addLegend()
+        self.pg_plot_money.setLabel('left', 'Деньги')
+        self.pg_plot_money.setLabel('bottom', 'Шаг симуляции')
+        self.pg_plot_money.setLabel('left', 'Деньги', color='green')  # опционально
+
         v_graph.addWidget(self.pg_plot)
         v_graph.addWidget(self.pg_plot_avg)
+        v_graph.addWidget(self.pg_plot_money)  # ✅ Добавлен
         self.tab_graphs.setLayout(v_graph)
         self.tabs.addTab(self.tab_graphs, "📊 Графики")
 
-        # -------------------------- Сигналы --------------------------
+        # Сигналы
         self.btn_start.clicked.connect(self.start)
         self.btn_stop.clicked.connect(self.stop)
         self.btn_emergency_all.clicked.connect(self.emergency_all)
         self.btn_repair_all.clicked.connect(self.repair_all)
-        self.btn_emergency_single.clicked.connect(self.emergency_one)
+        self.btn_emergency_single.clicked.connect(self.break_dock)
+        self.btn_fire_single.clicked.connect(self.fire_dock)
         self.btn_repair_single.clicked.connect(self.repair_one)
         self.slider_arrival.valueChanged.connect(self.set_arrival_prob)
 
-        # -------------------------- Нарисуем доки --------------------------
+        # Доки
         self.dock_items = []
         for i in range(MAX_BAYS):
             rect = self.scene.addRect(DOCK_X, 100+i*DOCK_Y_GAP, 150, 50, brush=QBrush(QColor("green")))
             self.dock_items.append(rect)
 
-        # Красивый стиль
         self.setStyleSheet("""
             QPushButton { font-size: 14px; padding: 5px; }
             QSlider::handle { background: #3498db; width: 15px; }
@@ -232,9 +216,8 @@ class MainWindow(QMainWindow):
             QTabWidget::pane { border: 1px solid #3498db; }
         """)
 
-    # -------------------------- Методы управления --------------------------
+    # -------------------------- Управление --------------------------
     def start(self):
-        # Сброс счётчика при старте (опционально)
         state["truck_id"] = 0
         state["step_count"] = 0
         state["waiting_trucks"].clear()
@@ -242,6 +225,11 @@ class MainWindow(QMainWindow):
         state["loaded_cumulative"].clear()
         state["wait_times"].clear()
         state["total_loaded"] = 0
+        state["money"] = 0
+        state["money_history"].clear()  # ✅ Сброс истории финансов
+        state["transactions"].clear()
+        state["fire_timers"] = [None]*MAX_BAYS
+        self.tx_browser.clear()
         self.timer.start(UPDATE_INTERVAL)
 
     def stop(self):
@@ -253,64 +241,138 @@ class MainWindow(QMainWindow):
 
     def emergency_all(self):
         for i in range(MAX_BAYS):
+            state["dock_status"][i] = "broken"
             state["active_bays"][i] = False
         self.update_dock_colors()
 
     def repair_all(self):
-        state["active_bays"] = [True]*MAX_BAYS
+        for i in range(MAX_BAYS):
+            if state["dock_status"][i] == "broken":
+                state["money"] -= state["repair_cost"]
+                state["transactions"].append(f"-{state['repair_cost']} починка дока {i+1}")
+            elif state["dock_status"][i] == "fire":
+                self.extinguish_fire(i)
+            state["dock_status"][i] = None
+            state["active_bays"][i] = True
         self.update_dock_colors()
         self.move_global_queue_to_docks()
 
-    def emergency_one(self):
+    def break_dock(self):
         idx = self.dock_combo.currentIndex()
+        state["dock_status"][idx] = "broken"
         state["active_bays"][idx] = False
         self.update_dock_colors()
 
+    def fire_dock(self):
+        idx = self.dock_combo.currentIndex()
+        if state["dock_status"][idx] in ["broken", "fire"]:
+            return
+
+        for truck in list(state["dock_queues"][idx]):
+            truck.loading = False
+            truck.progress.setRect(0, truck.rect().height() + 2, 0, 5)
+            truck.setBrush(QBrush(QColor(truck.color)))
+            truck.dock = None
+            truck.returning_to_queue = True
+            target_index = len(state["global_queue"])
+            truck.target_x = 50 + target_index * 55
+            truck.target_y = 50
+            if truck not in state["moving_trucks"]:
+                state["moving_trucks"].append(truck)
+
+        state["dock_queues"][idx].clear()
+        state["dock_status"][idx] = "fire"
+        state["active_bays"][idx] = False
+        state["fire_timers"][idx] = time.time() + FIRE_DURATION
+        state["money"] -= FIRE_COST
+        state["transactions"].append(f"-{FIRE_COST} тушение пожара в доке {idx+1}")
+        self.update_dock_colors()
+
+    def extinguish_fire(self, idx):
+        state["fire_timers"][idx] = None
+        state["dock_status"][idx] = None
+        state["active_bays"][idx] = True
+        self.update_dock_colors()
+        self.move_global_queue_to_docks()
+
     def repair_one(self):
         idx = self.dock_combo.currentIndex()
-        state["active_bays"][idx] = True
+        if state["dock_status"][idx] == "broken":
+            state["money"] -= state["repair_cost"]
+            state["transactions"].append(f"-{state['repair_cost']} починка дока {idx+1}")
+            state["dock_status"][idx] = None
+            state["active_bays"][idx] = True
+        elif state["dock_status"][idx] == "fire":
+            self.extinguish_fire(idx)
         self.update_dock_colors()
         self.move_global_queue_to_docks()
 
     def update_dock_colors(self):
         for i, rect in enumerate(self.dock_items):
-            if state["dock_queues"][i] and state["dock_queues"][i][0].loading:
-                color = "yellow"
+            if state["dock_status"][i] == "broken":
+                color = "darkred"
+            elif state["dock_status"][i] == "fire":
+                color = "red" if self.fire_colors[i] else "orange"
             else:
-                color = "green" if state["active_bays"][i] else "red"
+                color = "yellow" if state["dock_queues"][i] and state["dock_queues"][i][0].loading else "green"
             rect.setBrush(QBrush(QColor(color)))
 
-    # -------------------------- Основная симуляция --------------------------
+    def blink_fire_colors(self):
+        for i in range(MAX_BAYS):
+            if state["dock_status"][i] == "fire":
+                self.fire_colors[i] = not self.fire_colors[i]
+                self.update_dock_colors()
+
+    # -------------------------- Симуляция --------------------------
     def update_simulation(self):
+        for i in range(MAX_BAYS):
+            if state["dock_status"][i] == "fire" and state["fire_timers"][i] is not None:
+                if time.time() >= state["fire_timers"][i]:
+                    self.extinguish_fire(i)
+
         if random.random() < TRUCK_ARRIVAL_PROB:
             self.add_new_truck()
 
         for truck in list(state["moving_trucks"]):
-            truck.move_toward_target()
-            if truck.x() > 1200:
+            arrived = truck.move_toward_target()
+
+            if truck.returning_to_queue and arrived:
+                state["global_queue"].append(truck)
+                truck.returning_to_queue = False
+                state["moving_trucks"].remove(truck)
+            elif not truck.returning_to_queue and truck.x() > 1200:
                 self.scene.removeItem(truck)
-                if truck in state["moving_trucks"]:
-                    state["moving_trucks"].remove(truck)
+                state["moving_trucks"].remove(truck)
 
         for i, queue in enumerate(state["dock_queues"]):
             if queue:
                 truck = queue[0]
-                if not truck.loading and state["active_bays"][i]:
+                if not truck.loading and state["active_bays"][i] and state["dock_status"][i] != "fire":
                     if abs(truck.x() - truck.target_x) < 1 and abs(truck.y() - truck.target_y) < 1:
                         truck.loading = True
                         truck.start_time = time.time()
-                if truck.loading and not state["active_bays"][i]:
+                elif truck.loading and (not state["active_bays"][i] or state["dock_status"][i] == "fire"):
                     truck.loading = False
-                    truck.progress.setRect(0, truck.rect().height()+2, 0, 5)
+                    truck.progress.setRect(0, truck.rect().height() + 2, 0, 5)
                     truck.setBrush(QBrush(QColor(truck.color)))
-                elif truck.loading and state["active_bays"][i] and (time.time() - truck.start_time >= truck.load_time):
+                    truck.dock = None
+                    truck.returning_to_queue = True
+                    target_index = len(state["global_queue"])
+                    truck.target_x = 50 + target_index * 55
+                    truck.target_y = 50
+                    if truck not in state["moving_trucks"]:
+                        state["moving_trucks"].append(truck)
+                    state["dock_queues"][i].clear()
+                elif truck.loading and state["active_bays"][i] and state["dock_status"][i] != "fire" and (time.time() - truck.start_time >= truck.load_time):
                     self.finish_truck(truck, i)
 
         self.move_global_queue_to_docks()
         self.update_truck_table()
         self.update_graphs()
+        self.label_money.setText(f"💰 Деньги: {state['money']}")
+        self.tx_browser.setPlainText("\n".join(state["transactions"][-20:]))
 
-    # -------------------------- Логика грузовиков --------------------------
+    # -------------------------- Грузовики --------------------------
     def add_new_truck(self):
         state["truck_id"] += 1
         truck_type = random.choice(list(TRUCK_TYPES.keys()))
@@ -321,7 +383,8 @@ class MainWindow(QMainWindow):
         state["moving_trucks"].append(truck)
 
     def assign_truck_to_dock(self):
-        free_docks = [i for i, active in enumerate(state["active_bays"]) if active and len(state["dock_queues"][i])==0]
+        free_docks = [i for i, active in enumerate(state["active_bays"])
+                      if active and len(state["dock_queues"][i]) == 0 and state["dock_status"][i] not in ["broken", "fire"]]
         return free_docks[0] if free_docks else None
 
     def move_global_queue_to_docks(self):
@@ -345,6 +408,11 @@ class MainWindow(QMainWindow):
         state["total_loaded"] += 1
         wait_time = truck.start_time - truck.arrive_time
         state["wait_times"].append(wait_time)
+
+        profit = state["truck_profit"].get(truck.type, 50)
+        state["money"] += profit
+        state["transactions"].append(f"+{profit} от T{truck.id} ({truck.type})")
+
         truck.loading = False
         truck.setBrush(QBrush(QColor(truck.color)))
         truck.target_x = 1200
@@ -363,7 +431,7 @@ class MainWindow(QMainWindow):
                 self.truck_table.setItem(row, 2, QTableWidgetItem(f"Док {i+1}"))
                 status = "Погрузка" if truck.loading else "Ожидание"
                 self.truck_table.setItem(row, 3, QTableWidgetItem(status))
-                wait_time = int(time.time() - truck.arrive_time) if not truck.loading else int(truck.start_time - truck.arrive_time)
+                wait_time = int(truck.start_time - truck.arrive_time) if truck.loading else int(time.time() - truck.arrive_time)
                 self.truck_table.setItem(row, 4, QTableWidgetItem(str(wait_time)))
         for truck in state["global_queue"]:
             row = self.truck_table.rowCount()
@@ -378,18 +446,17 @@ class MainWindow(QMainWindow):
     def update_graphs(self):
         state["step_count"] += 1
         current_step = state["step_count"]
-
         queue_len = len(state["global_queue"]) + sum(len(q) for q in state["dock_queues"])
         loading = sum(1 for q in state["dock_queues"] if q and q[0].loading)
 
-        # Накапливаем полную историю
         state["waiting_trucks"].append(queue_len)
         state["loading_trucks"].append(loading)
         state["loaded_cumulative"].append(state["total_loaded"])
+        state["money_history"].append(state["money"])  # ✅ Сохраняем текущие деньги
 
-        # Ось X — шаги симуляции: 1, 2, 3, ..., N
         steps = list(range(1, current_step + 1))
 
+        # График очереди и загрузки
         self.pg_plot.clear()
         self.pg_plot.plot(steps, state["waiting_trucks"], pen=pg.mkPen('r', width=2), name="Очередь")
         self.pg_plot.plot(steps, state["loading_trucks"], pen=pg.mkPen('b', width=2), name="Погрузка")
@@ -398,10 +465,17 @@ class MainWindow(QMainWindow):
         # График среднего ожидания
         self.pg_plot_avg.clear()
         if state["wait_times"]:
-            # Вычисляем накопленное среднее
             avg = [sum(state["wait_times"][:i+1]) / (i+1) for i in range(len(state["wait_times"]))]
             truck_indices = list(range(1, len(avg) + 1))
             self.pg_plot_avg.plot(truck_indices, avg, pen=pg.mkPen('m', width=2), name="Среднее ожидание")
+
+        # ✅ График финансов
+        self.pg_plot_money.clear()
+        self.pg_plot_money.plot(steps, state["money_history"], pen=pg.mkPen('green', width=2), name="Деньги")
+        # Опционально: горизонтальная линия на нуле
+        if state["money_history"]:
+            self.pg_plot_money.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen('gray', style=Qt.PenStyle.DashLine)))
+
 
 # -------------------------- Запуск --------------------------
 if __name__ == "__main__":
