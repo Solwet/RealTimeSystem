@@ -111,12 +111,71 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.tabs)
 
         # Вкладка описание
+               # -------------------------- Вкладка описание --------------------------
         self.tab_desc = QWidget()
         layout_desc = QVBoxLayout()
         text = QTextBrowser()
-        text.setHtml("<h1 style='color:#2c3e50; text-align:center;'>Управление погрузкой грузовых автомобилей</h1>"
-                     "<p style='font-size:14px;'>Система моделирования работы доков на складе с финансовым учётом.</p>")
+
+        description_html = """
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px;">
+            <h1 style="text-align: center; color: #2c3e50; margin-bottom: 10px;">
+                🚛 Управление погрузкой грузовых автомобилей
+            </h1>
+            <p style="text-align: center; color: #7f8c8d; font-size: 16px; margin-bottom: 30px;">
+                Продвинутая симуляция складской логистики с финансовым учётом и чрезвычайными ситуациями
+            </p>
+
+            <div style="background: #f8f9fa; border-left: 8px solid #3498db; padding: 16px; margin: 20px 0; border-radius: 0 12px 12px 0;">
+                <h2 style="color: #2980b9; margin-top: 0;">Основные возможности</h2>
+                <ul style="font-size: 14px; line-height: 1.6; color: #34495e;">
+                    <li><b>Реалистичная очередь</b> — грузовики прибывают с заданной вероятностью и ждут своей очереди.</li>
+                    <li><b>Три типа грузовиков</b> — Small, Medium, Large с разной прибылью и временем погрузки.</li>
+                    <li><b>Аварийные ситуации</b> — пожары и поломки останавливают работу доков.</li>
+                    <li><b>Финансовая система</b> — прибыль от погрузки, расходы на ремонт и тушение.</li>
+                    <li><b>Плавная анимация</b> — грузовики плавно перемещаются, включая возврат в очередь при ЧС.</li>
+                    <li><b>Динамическая аналитика</b> — графики очереди, загрузки, ожидания и финансов в реальном времени.</li>
+                </ul>
+            </div>
+
+            <div style="background: #f8f9fa; border-left: 8px solid #f39c12; padding: 16px; margin: 20px 0; border-radius: 0 12px 12px 0;">
+                <h2 style="color: #e67e22; margin-top: 0;"> Цветовая индикация доков</h2>
+                <ul style="font-size: 14px; line-height: 1.6; color: #34494e;">
+                    <li><span style="display: inline-block; width: 16px; height: 16px; background: green; border: 1px solid #333; margin-right: 6px;"></span> <b>Зелёный</b> — док свободен и готов к работе.</li>
+                    <li><span style="display: inline-block; width: 16px; height: 16px; background: yellow; border: 1px solid #333; margin-right: 6px;"></span> <b>Жёлтый</b> — в доке идёт погрузка грузовика.</li>
+                    <li><span style="display: inline-block; width: 16px; height: 16px; background: red; border: 1px solid #333; margin-right: 6px;"></span> 
+                        <span style="display: inline-block; width: 16px; height: 16px; background: orange; border: 1px solid #333; margin-right: 6px;"></span> 
+                        <b>Красный - оранжевый</b> — в доке <b>пожар</b> (мигает для привлечения внимания).</li>
+                    <li><span style="display: inline-block; width: 16px; height: 16px; background: darkred; border: 1px solid #333; margin-right: 6px;"></span> <b>Тёмно-красный</b> — док <b>сломан</b> (авария, требует ремонта).</li>
+                </ul>
+            </div>
+
+            <div style="background: #f8f9fa; border-left: 8px solid #2ecc71; padding: 15px; margin: 20px 0; border-radius: 0 12px 12px 0;">
+                <h2 style="color: #27ae60; margin-top: 0;">💰 Финансовая модель</h2>
+                <h3 style="color: #27ae60; margin: 12px 0 8px 0;">Доходы (при успешной погрузке):</h3>
+                <ul style="font-size: 14px; line-height: 1.6; color: #2c3e50;">
+                    <li>🚛 <b>Small</b>: <span style="color: green; font-weight: bold;">+30</span></li>
+                    <li>🚛 <b>Medium</b>: <span style="color: green; font-weight: bold;">+50</span></li>
+                    <li>🚛 <b>Large</b>: <span style="color: green; font-weight: bold;">+80</span></li>
+                </ul>
+                <h3 style="color: #f8f9fa; margin: 16px 0 8px 0;">Расходы:</h3>
+                <ul style="font-size: 14px; line-height: 1.6; color: #2c3e50;">
+                    <li>🔧 <b>Ремонт дока</b>: <span style="color: red; font-weight: bold;">–100</span></li>
+                    <li>🚒 <b>Тушение пожара</b>: <span style="color: red; font-weight: bold;">–300</span></li>
+                </ul>
+                <p style="font-size: 13px; color: #7f8c8d; margin-top: 10px;">
+                    Все транзакции отображаются в реальном времени в журнале и влияют на общий баланс.
+                </p>
+            </div>
+
+            <div style="text-align: center; margin-top: 30px; color: #95a5a6; font-size: 13px;">
+                <p><b>Разработчик:</b> Мухтаров Руслан ПИ-430Б</p>
+            </div>
+        </div>
+        """
+
+        text.setHtml(description_html)
         text.setReadOnly(True)
+        text.setStyleSheet("border: none; background: transparent;")
         layout_desc.addWidget(text)
         self.tab_desc.setLayout(layout_desc)
         self.tabs.addTab(self.tab_desc, "🧭 Описание")
